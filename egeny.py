@@ -1,192 +1,131 @@
 import urllib.request
 import json
-import base64
-import time
+import sys
 
-# ==========================================
-# 1. AYARLAR VE API ANAHTARI
-# ==========================================
-# BURAYA KENDİ GROQ API ANAHTARINIZI YAPISTIRIN
-GROQ_API_KEY = "BURAYA_KENDI_GROQ_API_ANAHTARINIZI_YAPISTIRIN"
+GROQ_API_KEY = "BURAYA_KENDI_GROQ_API_ANAHTAR
+INIZI_YAPISTIRIN"
+GROQ_MODEL = "llama-3.1-8b-instant"
 
-# Renk Kodları (Terminalde renkli yazı için)
 RENK_YESIL = "\033[92m"
 RENK_MAVI = "\033[94m"
 RENK_SIYAH = "\033[0m"
 RENK_SARI = "\033[93m"
 RENK_KIRMIZI = "\033[91m"
+RENK_BEYAZ = "\033[97m"
 
-# Yapay Zekanın Kişiliği (System Prompt)
 SISTEM_TALIMATI = """
-Sen derin, özgür ve analitik düşünen bir yapay zeka asistanısın. 
-Kullanıcı sana '/github kullanici/repo' komutu verirse o projeyi, '/profil kullanici_adi' komutu verirse o kişinin GitHub profilini ve repolarını hafızana alırsın. 
-Sonraki soruları bu bilgileri kullanarak detaylıca cevaplarsın.
+Sen derin, ozgur ve analitik dusunen bir
+yapay zeka asistanisin.
+Kullanici '/github kullanici/repo' yazarsa o
+projeyi,
+'/profil kullanici_adi' yazarsa o kisinin
+profilini hafizana alirsin.
+Cevaplarin kisa ve mobil ekrana uygun olsun.
 """
 
-# Sohbet hafızası (Geçmişi tutar)
-sohbet_gecmisi = [{"role": "system", "content": SISTEM_TALIMATI}]
-# ==========================================
+sohbet_gecmisi = [{"role": "system",
+"content": SISTEM_TALIMATI}]
+hafiza = {"github": {}, "profil": {}}
 
 def ekrani_temizle():
-    # iOS uyumlu terminal temizleme
     print("\033c", end="")
 
 def github_api_get(url):
-    # GitHub API'sine GET isteği atan yardımcı fonksiyon
     req = urllib.request.Request(url)
     req.add_header("User-Agent", "PythonIDE-App")
     req.add_header("Accept", "application/vnd.github.v3+json")
     try:
-        with urllib.request.urlopen(req) as response:
+        with urllib.request.urlopen(req, timeout=10) as response:
             return json.loads(response.read().decode())
     except Exception as e:
-        print(f"{RENK_KIRMIZI}[API HATASI]: {e}{RENK_SIYAH}")
-        return None
+        return {"hata": str(e)}
 
-def github_profilini_hafizaya_al(kullanici_adi):
-    # Kullanıcı profili ve repolarını çeken fonksiyon
-    print(f"\n{RENK_SARI}[SİSTEM]: '{kullanici_adi}' kullanıcısının GitHub profili indiriliyor...{RENK_SIYAH}")
-    user_data = github_api_get(f"https://api.github.com/users/{kullanici_adi}")
-    
-    if not user_data or 'login' not in user_data:
-        print(f"{RENK_KIRMIZI}[HATA]: Kullanıcı bulunamadı.{RENK_SIYAH}")
-        return False
-        
-    profil_ozeti = f"""
-    --- GITHUB PROFİL BİLGİLERİ ---
-    Kullanıcı Adı: {user_data.get('login')}
-    Gerçek İsim: {user_data.get('name', 'Belirtilmemiş')}
-    Biyografi: {user_data.get('bio', 'Yok')}
-    Şirket: {user_data.get('company', 'Yok')}
-    Konum: {user_data.get('location', 'Yok')}
-    Halka Açık Repo Sayısı: {user_data.get('public_repos')}
-    Takipçi: {user_data.get('followers')} | Takip Edilen: {user_data.get('following')}
-    Hesap Oluşturma: {user_data.get('created_at')}
-    """
-    
-    print(f"  Repolar listeleniyor...")
-    repos_data = github_api_get(f"https://api.github.com/users/{kullanici_adi}/repos?sort=updated&per_page=30")
-    
-    repo_ozeti = "\n    --- SAHİP OLUNAN REPOLAR ---\n"
-    if repos_data and isinstance(repos_data, list):
-        for repo in repos_data:
-            dil = repo.get('language', 'Bilinmiyor')
-            yildiz = repo.get('stargazers_count', 0)
-            aciklama = repo.get('description', 'Açıklama yok')
-            isim = repo.get('name')
-            repo_ozeti += f"    - {isim} | Dil: {dil} | Yıldız: {yildiz} | Açıklama: {aciklama}\n"
-    else:
-        repo_ozeti += "    (Repo bulunamadı veya API limiti aşıldı)\n"
-
-    tum_baglam = profil_ozeti + repo_ozeti
-    hafiza_mesaji = f"Aşağıda '{kullanici_adi}' kullanıcısının GitHub profil detayları bulunmaktadır. Bundan sonraki sorularında bu bilgileri kullan:\n{tum_baglam}"
-    
-    sohbet_gecmisi.append({"role": "system", "content": hafiza_mesaji})
-    print(f"{RENK_YESIL}[SİSTEM]: Başarılı! Profil ve repolar hafızaya alındı.{RENK_SIYAH}\n")
-    return True
-
-def github_repoyu_hafizaya_al(repo):
-    # Belirli bir repodaki dosyaları çeken fonksiyon
-    print(f"\n{RENK_SARI}[SİSTEM]: '{repo}' reposu okunuyor...{RENK_SIYAH}")
-    proje_baglami = ""
-    
-    url = f"https://api.github.com/repos/{repo}/git/trees/main?recursive=1"
-    data = github_api_get(url)
-    
-    if not data or 'tree' not in data:
-        data = github_api_get(f"https://api.github.com/repos/{repo}/git/trees/master?recursive=1")
-        if not data or 'tree' not in data:
-            print(f"{RENK_KIRMIZI}[HATA]: Repo bulunamadı veya dal (branch) okunamadı.{RENK_SIYAH}")
-            return False
-            
-    dosyalar = [item['path'] for item in data['tree'] if item['path'].endswith(('.py', '.md', '.txt')) and 'test' not in item['path']]
-    dosyalar = dosyalar[:3] 
-    
-    if not dosyalar:
-        print(f"{RENK_SARI}[HATA]: Bu repoda okunacak dosya bulunamadı.{RENK_SIYAH}")
-        return False
-        
-    for dosya in dosyalar:
-        print(f"  İndiriliyor: {dosya}")
-        file_url = f"https://api.github.com/repos/{repo}/contents/{dosya}"
-        file_data = github_api_get(file_url)
-        
-        if file_data and 'content' in file_data:
-            icerik = base64.b64decode(file_data['content']).decode('utf-8', errors='ignore')
-            proje_baglami += f"\n--- DOSYA: {dosya} ---\n{icerik[:3000]}\n"
-            
-    hafiza_mesaji = f"Aşağıdaki dosyalar '{repo}' reposuna aittir. Bu içerikleri bilerek cevap ver:\n{proje_baglami}"
-    sohbet_gecmisi.append({"role": "system", "content": hafiza_mesaji})
-    
-    print(f"{RENK_YESIL}[SİSTEM]: Başarılı! {len(dosyalar)} dosya hafızaya alındı.{RENK_SIYAH}\n")
-    return True
-
-def yapay_zeka_ile_sohbet_et(kullanici_mesaji, api_key):
-    # Groq API'sine istek atan ana fonksiyon
-    sohbet_gecmisi.append({"role": "user", "content": kullanici_mesaji})
-    url = "https://api.groq.com/openai/v1/chat/completions" 
+def groq_chat(messages):
+    if "BURAYA" in GROQ_API_KEY:
+        return "HATA: Lutfen egeny.py icindeki GROQ_API_KEY kismina kendi anahtarinizi yazin."
+    url = "https://api.groq.com/openai/v1/chat/completions"
     data = {
-        "model": "openai/gpt-oss-120b", 
-        "messages": sohbet_gecmisi,
-        "temperature": 0.7
+        "model": GROQ_MODEL,
+        "messages": messages,
+        "temperature": 0.7,
+        "max_tokens": 1024
     }
-    req = urllib.request.Request(url, data=json.dumps(data).encode('utf-8'), method='POST')
-    req.add_header("Content-Type", "application/json")
-    req.add_header("Authorization", f"Bearer {api_key}")
-    req.add_header("User-Agent", "Mozilla/5.0")
-    
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(data).encode(),
+        headers={
+            "Authorization": "Bearer " + GROQ_API_KEY,
+            "Content-Type": "application/json"
+        }
+    )
     try:
-        with urllib.request.urlopen(req) as response:
-            sonuc = json.loads(response.read().decode())
-            cevap = sonuc['choices'][0]['message']['content']
-            sohbet_gecmisi.append({"role": "assistant", "content": cevap})
-            return cevap
+        with urllib.request.urlopen(req, timeout=30) as response:
+            result = json.loads(response.read().decode())
+            return result["choices"][0]["message"]["content"]
     except Exception as e:
-        return f"Sistemsel hata: {e}"
+        return "API Hatasi: " + str(e)
+
+def komut_isle(komut):
+    parcalar = komut.split()
+    if len(parcalar) < 2:
+        return None
+    if parcalar[0] == "/github" and len(parcalar) >= 3:
+        kullanici = parcalar[1]
+        repo = parcalar[2]
+        url = "https://api.github.com/repos/" + kullanici + "/" + repo
+        veri = github_api_get(url)
+        if "hata" not in veri:
+            hafiza["github"][kullanici + "/" + repo] = veri
+            return RENK_YESIL + "OK: " + kullanici + "/" + repo + " hafizaya alindi." + RENK_SIYAH + "\nAciklama: " + str(veri.get("description", "Yok")) + "\nYildiz: " + str(veri.get("stargazers_count", 0))
+        else:
+            return RENK_KIRMIZI + "Hata: " + veri["hata"] + RENK_SIYAH
+    elif parcalar[0] == "/profil" and len(parcalar) >= 2:
+        kullanici = parcalar[1]
+        url = "https://api.github.com/users/" + kullanici
+        veri = github_api_get(url)
+        if "hata" not in veri:
+            hafiza["profil"][kullanici] = veri
+            repo_url = "https://api.github.com/users/" + kullanici + "/repos?per_page=10"
+            repolar = github_api_get(repo_url)
+            liste = ""
+            if isinstance(repolar, list):
+                for r in repolar[:5]:
+                    liste += "- " + r["name"] + ": " + str(r.get("description", ""))[:40] + "\n"
+            return RENK_YESIL + "OK: " + kullanici + " profili alindi." + RENK_SIYAH + "\nAd: " + str(veri.get("name", "Yok")) + "\nRepolar:\n" + liste
+        else:
+            return RENK_KIRMIZI + "Hata: " + veri["hata"] + RENK_SIYAH
+    return None
 
 def arayuzu_baslat():
-    # Ana döngü (Kullanıcıdan komut alır)
     ekrani_temizle()
-    print(RENK_MAVI + "="*55)
-    print(f"{RENK_YESIL}    🧠 DEEP AI ASİSTANI (Gelişmiş Okuma Modu)    ")
-    print(RENK_MAVI + "="*55 + RENK_SIYAH)
-    print("💡 Komutlar:")
-    print("   /profil kullanici_adi  -> Tüm profil ve repoları öğrenir")
-    print("   /github kullanici/repo -> Repodaki dosyaları okur")
-    print("Çıkmak için 'q' yazıp Enter'a basın.\n")
-    
+    print(RENK_MAVI + "=== PuthonIDE ===" + RENK_SIYAH)
+    print(RENK_SARI + "Komutlar: /github k/repo | /profil k | cikis" + RENK_SIYAH)
+    print()
     while True:
         try:
-            kullanici_girdisi = input(RENK_MAVI + "🧑 Sen: " + RENK_SIYAH)
-            
-            if kullanici_girdisi.lower() in ['q', 'çıkış', 'exit']:
-                print(RENK_YESIL + "\n🤖 Asistan: Görüşmek üzere!" + RENK_SIYAH)
-                break
-                
-            if not kullanici_girdisi.strip():
+            girdi = input(RENK_YESIL + "Sen: " + RENK_SIYAH).strip()
+            if not girdi:
                 continue
-                
-            if kullanici_girdisi.startswith("/profil "):
-                kullanici_adi = kullanici_girdisi.replace("/profil ", "").strip()
-                github_profilini_hafizaya_al(kullanici_adi)
-                continue 
-                
-            if kullanici_girdisi.startswith("/github "):
-                repo_adi = kullanici_girdisi.replace("/github ", "").strip()
-                repo_adi = repo_adi.replace("https://github.com/", "").replace(".git", "")
-                github_repoyu_hafizaya_al(repo_adi)
-                continue 
-                
-            print(RENK_YESIL + "🤖 Asistan: " + RENK_SIYAH, end="", flush=True)
-            time.sleep(0.5)
-            cevap = yapay_zeka_ile_sohbet_et(kullanici_girdisi, GROQ_API_KEY)
-            print(cevap + "\n")
-            
+            if girdi.lower() in ["cikis", "exit", "quit"]:
+                print("Gorusmek uzere!")
+                break
+            if girdi.startswith("/"):
+                sonuc = komut_isle(girdi)
+                if sonuc:
+                    print(sonuc)
+                    continue
+            sohbet_gecmisi.append({"role": "user", "content": girdi})
+            print(RENK_MAVI + "Dusunuyor..." + RENK_SIYAH)
+            cevap = groq_chat(sohbet_gecmisi)
+            print(RENK_BEYAZ + "Asistan: " + cevap + RENK_SIYAH + "\n")
+            sohbet_gecmisi.append({"role": "assistant", "content": cevap})
+            if len(sohbet_gecmisi) > 21:
+                sohbet_gecmisi = [sohbet_gecmisi[0]] + sohbet_gecmisi[-20:]
         except KeyboardInterrupt:
-            print("\n" + RENK_YESIL + "🤖 Asistan: Görüşmek üzere!" + RENK_SIYAH)
+            print("\nCikis yapiliyor...")
             break
         except Exception as e:
-            print(f"\n{RENK_KIRMIZI}Bir hata oluştu: {e}{RENK_SIYAH}")
+            print(RENK_KIRMIZI + "Hata: " + str(e) + RENK_SIYAH)
 
 if __name__ == "__main__":
     arayuzu_baslat()
